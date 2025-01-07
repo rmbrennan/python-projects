@@ -2,19 +2,11 @@ import os
 import streamlit as st
 import asyncio
 import pandas as pd
-from dotenv import load_dotenv
 from fpl_agents import FPLAgent, DataScraperAgent, TeamOptimizationAgent,  TransferAgent, CaptainAgent # Add more agents here as needed
-
-# Load environment variables
-load_dotenv()
-
-# Fetch email and password from environment variables
-email = os.getenv("FPL_EMAIL")
-password = os.getenv("FPL_PASSWORD")
 
 # Initialize available agents
 available_agents = {
-    "Data Scraper": DataScraperAgent(email, password),
+    "Data Scraper": DataScraperAgent(),
     "Team Optimizer": TeamOptimizationAgent(),
     "Transfer Agent": TransferAgent(),
     "Captain Agent": CaptainAgent(),

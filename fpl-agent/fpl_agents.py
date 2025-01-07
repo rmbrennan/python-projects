@@ -4,21 +4,6 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import requests
 import logging
-import json
-from datetime import datetime
-from dotenv import load_dotenv
-import os
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-import time
-
-load_dotenv()  # Load .env file
-
-email = os.getenv("FPL_EMAIL")
-password = os.getenv("FPL_PASSWORD")
 
 class FPLAgent(ABC):
     def __init__(self):
@@ -44,99 +29,63 @@ class FPLAgent(ABC):
         pass
 
 class DataScraperAgent(FPLAgent):
-    def __init__(self, email: str, password: str):
+    def __init__(self):
         super().__init__()
-        self.email = email
-        self.password = password
-        self.session = requests.Session()  # Retain for subsequent API calls
 
-    def authenticate_with_selenium(self):
+    def fetch_user_team(self, user_team_id: int, gameweek: int) -> Dict:
         """
-        Authenticate with the FPL website using Selenium.
+        Fetch the user's current FPL team for a specific gameweek.
         """
-        # Configure Selenium WebDriver
-
-        chrome_options = Options()
-        # chrome_options.add_argument("--headless")  # Run without a UI
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_service = Service("/opt/homebrew/bin/chromedriver")  # Adjust the path to chromedriver
-
-        driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+        user_team_url = f"{self.base_url}entry/{user_team_id}/event/{gameweek}/picks/"
         try:
-            login_url = "https://users.premierleague.com/accounts/login/"
-            driver.get(login_url)
-            time.sleep(2)  # Allow time for the page to load
-            
-            # Find and fill in the email and password fields
-            email_field = driver.find_element(By.ID, "ism-email")  # Update ID if necessary
-            password_field = driver.find_element(By.ID, "ism-password")  # Update ID if necessary
-            email_field.send_keys(self.email)
-            password_field.send_keys(self.password)
-            
-            # Submit the form
-            password_field.send_keys(Keys.RETURN)
-            time.sleep(5)  # Wait for authentication to complete
-            
-            # Extract cookies from Selenium
-            cookies = driver.get_cookies()
-            for cookie in cookies:
-                self.session.cookies.set(cookie['name'], cookie['value'])
-            
-            # Verify authentication
-            csrftoken = self.session.cookies.get("csrftoken")
-            if not csrftoken:
-                raise Exception("Failed to retrieve CSRF token after login.")
-            self.logger.info("Successfully authenticated using Selenium.")
-        finally:
-            driver.quit()
+            response = requests.get(user_team_url)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            self.logger.error(f"Error fetching user team data for GW {gameweek}: {e}")
+            return {}
 
-    def fetch_user_team(self):
+    def get_latest_gameweek(self, events: List[Dict]) -> int:
         """
-        Fetch the user's current FPL team.
+        Find the latest gameweek from the events data.
         """
-        user_team_url = "https://fantasy.premierleague.com/api/my-team/"
-        response = self.session.get(user_team_url)
-        if response.status_code != 200:
-            raise Exception("Failed to fetch team data.")
-        return response.json()
+        for event in events:
+            if event.get("is_current", False):
+                return event["id"]
+        self.logger.error("No current gameweek found in events data.")
+        return -1  # Indicate failure to find the current gameweek
 
     async def process(self, data: Dict) -> Dict:
-        """Scrape and aggregate FPL data"""
+        """Fetch and process FPL player and user team data."""
         try:
             # Fetch general data
-            general_info = self.fetch_data("bootstrap-static/")
-            fixtures = self.fetch_data("fixtures/")
-            
-            # Process player data
-            players_df = pd.DataFrame(general_info['elements'])
-            teams_df = pd.DataFrame(general_info['teams'])
-            fixtures_df = pd.DataFrame(fixtures)
-            
-            # Add team name to players
+            bootstrap_data = self.fetch_data("bootstrap-static/")
+            elements = bootstrap_data.get("elements", [])
+            teams = bootstrap_data.get("teams", [])
+            events = bootstrap_data.get("events", [])
+
+            # Get the latest gameweek
+            latest_gameweek = self.get_latest_gameweek(events)
+            if latest_gameweek == -1:
+                raise ValueError("Failed to find the current gameweek.")
+
+            # Fetch user team for the latest gameweek
+            user_team_id = data.get("user_team_id", 1)  # Default to a valid user team ID
+            user_team_data = self.fetch_user_team(user_team_id, latest_gameweek)
+
+            # Process player data into a DataFrame
+            players_df = pd.DataFrame(elements)
             players_df['team_name'] = players_df['team'].map(
-                teams_df.set_index('id')['name']
+                pd.DataFrame(teams).set_index('id')['name']
             )
-            
-            # Process fixtures
-            if not fixtures_df.empty:
-                fixtures_df['team_h_name'] = fixtures_df['team_h'].map(
-                    teams_df.set_index('id')['name']
-                )
-                fixtures_df['team_a_name'] = fixtures_df['team_a'].map(
-                    teams_df.set_index('id')['name']
-                )
-            
-            # Calculate value (price per point)
-            players_df['value'] = players_df['total_points'] / players_df['now_cost']
-            
-            # Select relevant columns
+
+            # Include only relevant fields for simplicity
             players_df = players_df[[
-                'web_name', 'element_type', 'team_name', 'now_cost', 
-                'total_points', 'minutes', 'goals_scored', 'assists',
-                'clean_sheets', 'value', 'selected_by_percent'
+                'id', 'web_name', 'team_name', 'element_type', 'now_cost', 
+                'total_points', 'minutes', 'goals_scored', 'assists', 'clean_sheets', 
+                'selected_by_percent'
             ]]
-            
+
             # Rename columns for clarity
             players_df = players_df.rename(columns={
                 'web_name': 'name',
@@ -144,30 +93,34 @@ class DataScraperAgent(FPLAgent):
                 'now_cost': 'price',
                 'selected_by_percent': 'ownership'
             })
-            
-            # Convert position IDs to names
+
+            # Map position IDs to position names
             position_map = {1: 'GKP', 2: 'DEF', 3: 'MID', 4: 'FWD'}
             players_df['position'] = players_df['position'].map(position_map)
-            
-            # Authenticate and fetch user's actual team
-            self.authenticate_with_selenium()
-            user_team_data = self.fetch_user_team()
 
-            # Map user team to detailed player info
-            current_team = [
-                player for player in players_df.to_dict('records')
-                if player['id'] in [p['element'] for p in user_team_data['picks']]
-            ]
-            
+            # Map user's team data to player information
+            user_team = user_team_data.get('picks', [])
+            user_team_details = []
+            for player in user_team:
+                player_data = players_df[players_df['id'] == player['element']].to_dict('records')
+                if player_data:
+                    player_info = player_data[0]
+                    player_info.update({
+                        "position": player['position'],
+                        "multiplier": player['multiplier'],
+                        "is_captain": player['is_captain'],
+                        "is_vice_captain": player['is_vice_captain']
+                    })
+                    user_team_details.append(player_info)
+
             return {
                 'players': players_df,
-                'teams': teams_df,
-                'fixtures': fixtures_df,
-                'current_team': current_team,
-                'timestamp': pd.Timestamp.now()
+                'user_team': user_team_details,
+                'latest_gameweek': latest_gameweek,
+                'timestamp': pd.Timestamp.now(),
             }
         except Exception as e:
-            self.logger.error(f"Error scraping data: {e}")
+            self.logger.error(f"Error processing data: {e}")
             raise
 
 class TeamOptimizationAgent(FPLAgent):
@@ -353,7 +306,7 @@ class CaptainAgent(FPLAgent):
 # Orchestrator
 class FPLOrchestrator:
     def __init__(self):
-        self.data_scraper = DataScraperAgent(email, password)
+        self.data_scraper = DataScraperAgent()
         self.team_optimizer = TeamOptimizationAgent()
         self.transfer_advisor = TransferAgent()
         self.captain_advisor = CaptainAgent()
@@ -398,16 +351,13 @@ class FPLOrchestrator:
 
 # Usage Example
 async def main():
-    orchestrator = FPLOrchestrator()
-    user_team_id = 12345  # Example team ID
-    
+    scraper = DataScraperAgent()
+    user_team_id = 6256406  # My FPL team ID
     try:
-        results = await orchestrator.run_workflow(user_team_id)
-        print("Workflow completed successfully!")
-        print(f"Suggested transfers: {results['transfer_suggestions']}")
-        print(f"Captain recommendation: {results['captain_advice']['primary_captain']}")
+        data = await scraper.process({"user_team_id": user_team_id})
+        print(data)
     except Exception as e:
-        print(f"Error running workflow: {e}")
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
