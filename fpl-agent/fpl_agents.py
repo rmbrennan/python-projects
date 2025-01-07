@@ -57,7 +57,7 @@ class DataScraperAgent(FPLAgent):
         # Configure Selenium WebDriver
 
         chrome_options = Options()
-        chrome_options.add_argument("--headless")  # Run without a UI
+        # chrome_options.add_argument("--headless")  # Run without a UI
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
         chrome_service = Service("/opt/homebrew/bin/chromedriver")  # Adjust the path to chromedriver
@@ -69,8 +69,8 @@ class DataScraperAgent(FPLAgent):
             time.sleep(2)  # Allow time for the page to load
             
             # Find and fill in the email and password fields
-            email_field = driver.find_element(By.ID, "loginUsername")  # Update ID if necessary
-            password_field = driver.find_element(By.ID, "loginPassword")  # Update ID if necessary
+            email_field = driver.find_element(By.ID, "ism-email")  # Update ID if necessary
+            password_field = driver.find_element(By.ID, "ism-password")  # Update ID if necessary
             email_field.send_keys(self.email)
             password_field.send_keys(self.password)
             
