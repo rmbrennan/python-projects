@@ -2,14 +2,16 @@ import os
 import streamlit as st
 import asyncio
 import pandas as pd
-from fpl_agents import FPLAgent, DataScraperAgent, TeamOptimizationAgent,  TransferAgent, CaptainAgent # Add more agents here as needed
+from fpl_agents import FPLAgent, DataScraperAgent, OptimalTeamAgent,  TransferAgent, CaptainAgent # Add more agents here as needed
+
+
 
 # Initialize available agents
 available_agents = {
     "Data Scraper": DataScraperAgent(),
-    "Team Optimizer": TeamOptimizationAgent(),
-    "Transfer Agent": TransferAgent(),
-    "Captain Agent": CaptainAgent(),
+    "Optimal Team": OptimalTeamAgent(players_df),
+    # "Transfer Agent": TransferAgent(),
+    # "Captain Agent": CaptainAgent(),
     # Add more agents like "Performance Analyzer": PerformanceAnalyzerAgent(), etc.
 }
 

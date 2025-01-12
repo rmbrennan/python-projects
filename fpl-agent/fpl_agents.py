@@ -4,6 +4,19 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import requests
 import logging
+import numpy as np
+from typing import List, Dict, Tuple
+from dataclasses import dataclass
+import random
+
+@dataclass
+class Player:
+    id: int
+    name: str
+    position: str  # 'GK', 'DEF', 'MID', 'FWD'
+    team: str
+    price: float
+    expected_points: float
 
 class FPLAgent(ABC):
     def __init__(self):
@@ -64,28 +77,28 @@ class DataScraperAgent(FPLAgent):
             teams = bootstrap_data.get("teams", [])
             events = bootstrap_data.get("events", [])
 
-            # Get the latest gameweek
-            latest_gameweek = self.get_latest_gameweek(events)
-            if latest_gameweek == -1:
-                raise ValueError("Failed to find the current gameweek.")
-
-            # Fetch user team for the latest gameweek
-            user_team_id = data.get("user_team_id", 1)  # Default to a valid user team ID
-            user_team_data = self.fetch_user_team(user_team_id, latest_gameweek)
-
+            # Ensure teams data is present
+            if not teams:
+                raise ValueError("Teams data is missing from the bootstrap-static dataset.")
+            
+            # Create a mapping of team IDs to team names
+            team_mapping = {team['id']: team['name'] for team in teams}
+            
             # Process player data into a DataFrame
             players_df = pd.DataFrame(elements)
-            players_df['team_name'] = players_df['team'].map(
-                pd.DataFrame(teams).set_index('id')['name']
-            )
-
-            # Include only relevant fields for simplicity
+            if players_df.empty:
+                raise ValueError("No player data available in the bootstrap-static dataset.")
+            
+            # Add a team_name column using the team mapping
+            players_df['team_name'] = players_df['team'].map(team_mapping)
+            
+            # Include only relevant fields
             players_df = players_df[[
                 'id', 'web_name', 'team_name', 'element_type', 'now_cost', 
                 'total_points', 'minutes', 'goals_scored', 'assists', 'clean_sheets', 
                 'selected_by_percent'
             ]]
-
+            
             # Rename columns for clarity
             players_df = players_df.rename(columns={
                 'web_name': 'name',
@@ -93,11 +106,19 @@ class DataScraperAgent(FPLAgent):
                 'now_cost': 'price',
                 'selected_by_percent': 'ownership'
             })
-
+            
             # Map position IDs to position names
             position_map = {1: 'GKP', 2: 'DEF', 3: 'MID', 4: 'FWD'}
             players_df['position'] = players_df['position'].map(position_map)
-
+            
+            # Fetch user team for the latest gameweek
+            latest_gameweek = self.get_latest_gameweek(events)
+            if latest_gameweek == -1:
+                raise ValueError("Failed to find the current gameweek.")
+            
+            user_team_id = data.get("user_team_id", 6256406)  # Default to a valid user team ID
+            user_team_data = self.fetch_user_team(user_team_id, latest_gameweek)
+            
             # Map user's team data to player information
             user_team = user_team_data.get('picks', [])
             user_team_details = []
@@ -105,100 +126,205 @@ class DataScraperAgent(FPLAgent):
                 player_data = players_df[players_df['id'] == player['element']].to_dict('records')
                 if player_data:
                     player_info = player_data[0]
-                    player_info.update({
-                        "position": player['position'],
+                    user_team_details.append({
+                        'id': player['element'],
+                        "name": player_info.get("name", "Unknown"),
+                        "team_name": player_info.get("team_name", "Unknown Team"),
+                        "position": player_info.get("position", "Unknown Position"),
+                        "price": player_info.get("price", 0) / 10,  # Convert price to decimal
+                        "total_points": player_info.get("total_points", 0),
+                        "minutes": player_info.get("minutes", 0),
+                        "goals_scored": player_info.get("goals_scored", 0),
+                        "assists": player_info.get("assists", 0),
+                        "clean_sheets": player_info.get("clean_sheets", 0),
+                        "ownership": player_info.get("ownership", "0.0"),
+                        "position_on_field": player['position'],
                         "multiplier": player['multiplier'],
                         "is_captain": player['is_captain'],
                         "is_vice_captain": player['is_vice_captain']
                     })
-                    user_team_details.append(player_info)
-
+            
+            # Convert user team details into a DataFrame
+            user_team_df = pd.DataFrame(user_team_details)
+            
+            # Reorder columns for better readability
+            user_team_df = user_team_df[[
+                "id", "name", "team_name", "position", "price", "total_points", "minutes",
+                "goals_scored", "assists", "clean_sheets", "ownership", 
+                "position_on_field", "multiplier", "is_captain", "is_vice_captain"
+            ]]
+            
             return {
-                'players': players_df,
-                'user_team': user_team_details,
+                'my_team': user_team_df,
+                'all_players': players_df,
                 'latest_gameweek': latest_gameweek,
                 'timestamp': pd.Timestamp.now(),
             }
+        
         except Exception as e:
             self.logger.error(f"Error processing data: {e}")
             raise
 
-class TeamOptimizationAgent(FPLAgent):
-    def __init__(self):
-        super().__init__()
-        self.budget = 100.0
+class FantasyTeamOptimizer:
+    def __init__(self, all_players: List[Player], budget: float = 100.0):
+        self.all_players = all_players
+        self.budget = budget
         self.position_limits = {
-            'GKP': (2, 2),
+            'GK': (2, 2),   # (min, max)
             'DEF': (5, 5),
             'MID': (5, 5),
             'FWD': (3, 3)
         }
-
-    def _calculate_expected_points(self, players_df: pd.DataFrame, fixtures_df: pd.DataFrame) -> pd.Series:
-        try:
-            # Simple expected points based on form and fixtures
-            points = players_df['total_points'] / players_df['minutes'] * 90
-            return points.fillna(0)
-        except Exception as e:
-            self.logger.error(f"Error calculating expected points: {e}")
-            return pd.Series(0, index=players_df.index)
-
-    def _select_optimal_team(self, players_df: pd.DataFrame) -> List[Dict]:
-        try:
-            selected_team = []
-            remaining_budget = self.budget
+        self.starting_position_limits = {
+            'GK': (1, 1),   # (min, max)
+            'DEF': (3, 5),
+            'MID': (3, 5),
+            'FWD': (1, 3)
+        }
+        
+    def validate_team(self, team: List[Player]) -> bool:
+        # Check total players
+        if len(team) != 15:
+            return False
             
-            for position, (min_count, max_count) in self.position_limits.items():
-                position_players = players_df[players_df['position'] == position].copy()
-                position_players = position_players.nlargest(max_count, 'value')
+        # Check budget
+        if sum(p.price for p in team) > self.budget:
+            return False
+            
+        # Check position limits
+        position_counts = {'GK': 0, 'DEF': 0, 'MID': 0, 'FWD': 0}
+        team_counts = {}
+        
+        for player in team:
+            position_counts[player.position] += 1
+            team_counts[player.team] = team_counts.get(player.team, 0) + 1
+            
+            # Check team limit (max 3 players per team)
+            if team_counts[player.team] > 3:
+                return False
+        
+        # Verify position counts
+        for pos, (min_count, max_count) in self.position_limits.items():
+            if not min_count <= position_counts[pos] <= max_count:
+                return False
                 
-                for _, player in position_players.iterrows():
-                    if len(selected_team) < 15 and player['price']/10 <= remaining_budget:
-                        selected_team.append(player.to_dict())
-                        remaining_budget -= player['price']/10
+        return True
+    
+    def validate_starting_eleven(self, starters: List[Player]) -> bool:
+        if len(starters) != 11:
+            return False
             
-            return selected_team
-        except Exception as e:
-            self.logger.error(f"Error selecting optimal team: {e}")
-            return []
-
-    def _calculate_remaining_budget(self, team: List[Dict]) -> float:
-        try:
-            spent = sum(player['price']/10 for player in team)
-            return self.budget - spent
-        except Exception as e:
-            self.logger.error(f"Error calculating budget: {e}")
-            return 0.0
-
-    async def process(self, data: Dict) -> Dict:
-            """
-            Optimize and suggest a team based on player and fixture data.
-            """
-            try:
-                self.logger.info("Starting team optimization.")
-
-                # Validate required keys
-                if 'players' not in data or 'fixtures' not in data:
-                    raise KeyError("Missing required data: 'players' and/or 'fixtures'.")
-
-                players = data['players']
-                fixtures = data['fixtures']
-
-                # Example optimization logic: pick top 15 players by total points
-                recommended_team = sorted(players, key=lambda x: x.get('total_points', 0), reverse=True)[:15]
-
-                # Construct detailed output
-                processed_data = {
-                    "recommended_team": recommended_team,
-                    "timestamp": datetime.now().isoformat(),
-                }
-
-                self.logger.info("Team optimization complete.")
-                return processed_data
-
-            except Exception as e:
-                self.logger.error(f"Error during team optimization: {e}")
-                return {"error": str(e)}
+        position_counts = {'GK': 0, 'DEF': 0, 'MID': 0, 'FWD': 0}
+        for player in starters:
+            position_counts[player.position] += 1
+            
+        for pos, (min_count, max_count) in self.starting_position_limits.items():
+            if not min_count <= position_counts[pos] <= max_count:
+                return False
+                
+        return True
+    
+    def select_starting_eleven(self, squad: List[Player]) -> Tuple[List[Player], List[Player]]:
+        """
+        Select the optimal starting 11 from the 15-player squad.
+        Returns (starting_11, bench)
+        """
+        # Sort players by expected points within each position
+        by_position = {
+            'GK': sorted([p for p in squad if p.position == 'GK'], 
+                        key=lambda x: x.expected_points, reverse=True),
+            'DEF': sorted([p for p in squad if p.position == 'DEF'],
+                         key=lambda x: x.expected_points, reverse=True),
+            'MID': sorted([p for p in squad if p.position == 'MID'],
+                         key=lambda x: x.expected_points, reverse=True),
+            'FWD': sorted([p for p in squad if p.position == 'FWD'],
+                         key=lambda x: x.expected_points, reverse=True)
+        }
+        
+        # Start with minimum requirements
+        starting_11 = (
+            by_position['GK'][:1] +  # 1 GK
+            by_position['DEF'][:3] +  # 3 DEF
+            by_position['MID'][:3] +  # 3 MID
+            by_position['FWD'][:1]    # 1 FWD
+        )
+        
+        # Add remaining 3 highest point scorers that maintain valid formation
+        remaining_players = (
+            by_position['DEF'][3:] +
+            by_position['MID'][3:] +
+            by_position['FWD'][1:]
+        )
+        remaining_players.sort(key=lambda x: x.expected_points, reverse=True)
+        
+        for player in remaining_players:
+            temp_team = starting_11 + [player]
+            if len(temp_team) <= 11 and self.validate_starting_eleven(temp_team):
+                starting_11.append(player)
+                
+            if len(starting_11) == 11:
+                break
+                
+        # Create bench from remaining players
+        bench = [p for p in squad if p not in starting_11]
+        return starting_11, bench
+    
+    def optimize_team(self, iterations: int = 1000) -> Tuple[List[Player], List[Player]]:
+        """
+        Main optimization function using a genetic algorithm approach.
+        Returns (best_starting_11, best_bench)
+        """
+        best_squad = None
+        best_score = -float('inf')
+        
+        def create_random_squad():
+            squad = []
+            for pos, (min_count, _) in self.position_limits.items():
+                eligible = [p for p in self.all_players if p.position == pos]
+                squad.extend(random.sample(eligible, min_count))
+            return squad
+        
+        # Initial population
+        population = []
+        for _ in range(50):  # population size
+            squad = create_random_squad()
+            if self.validate_team(squad):
+                population.append(squad)
+        
+        for _ in range(iterations):
+            # Tournament selection
+            new_population = []
+            for _ in range(len(population)):
+                tournament = random.sample(population, 3)
+                winner = max(tournament, 
+                           key=lambda squad: sum(p.expected_points for p in squad))
+                new_population.append(winner.copy())
+            
+            # Mutation
+            for squad in new_population:
+                if random.random() < 0.1:  # mutation rate
+                    pos = random.choice(['GK', 'DEF', 'MID', 'FWD'])
+                    idx = random.randint(0, len(squad) - 1)
+                    eligible = [p for p in self.all_players 
+                              if p.position == pos and p not in squad]
+                    if eligible:
+                        squad[idx] = random.choice(eligible)
+            
+            # Evaluate and update best squad
+            for squad in new_population:
+                if self.validate_team(squad):
+                    starting_11, _ = self.select_starting_eleven(squad)
+                    score = sum(p.expected_points for p in starting_11)
+                    if score > best_score:
+                        best_score = score
+                        best_squad = squad
+            
+            population = new_population
+        
+        if best_squad:
+            return self.select_starting_eleven(best_squad)
+        else:
+            raise ValueError("Could not find a valid team configuration")
         
 class TransferAgent(FPLAgent):
     def __init__(self):
@@ -307,7 +433,8 @@ class CaptainAgent(FPLAgent):
 class FPLOrchestrator:
     def __init__(self):
         self.data_scraper = DataScraperAgent()
-        self.team_optimizer = TeamOptimizationAgent()
+        self.optimal_team = OptimalTeamAgent()
+        # self.team_optimizer = TeamOptimizationAgent()
         self.transfer_advisor = TransferAgent()
         self.captain_advisor = CaptainAgent()
         self.logger = logging.getLogger("Orchestrator")
@@ -351,13 +478,52 @@ class FPLOrchestrator:
 
 # Usage Example
 async def main():
-    scraper = DataScraperAgent()
-    user_team_id = 6256406  # My FPL team ID
+    # Initialize DataScraperAgent
+    data_scraper = DataScraperAgent()
+
+    # Fetch and process data
     try:
-        data = await scraper.process({"user_team_id": user_team_id})
-        print(data)
+        processed_data = await data_scraper.process(data={"user_team_id": 6256406})
+        players_df = processed_data['all_players']
+
+        # Initialize OptimalTeamAgent
+        optimal_team_agent = OptimalTeamAgent(players_df)
+
+        # Suggest the optimal team
+        optimal_team_df = optimal_team_agent.suggest_optimal_team()
+
+        # Display the optimal team
+        print(optimal_team_df)
+
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"An error occurred: {e}")
+
+    # Example usage:
+def select_optimal_team(player_data: List[Dict], budget: float = 100.0) -> Tuple[List[Player], List[Player]]:
+    """
+    Main function to select optimal team given player data.
+    Returns (starting_11, bench)
+    """
+    # Convert raw player data to Player objects
+    players = [
+        Player(
+            id=p['id'],
+            name=p['name'],
+            position=p['position'],
+            team=p['team'],
+            price=p['price'],
+            expected_points=p['expected_points']
+        )
+        for p in player_data
+    ]
+    
+    optimizer = FantasyTeamOptimizer(players, budget)
+    starting_11, bench = optimizer.optimize_team(iterations=1000)
+    
+    # Sort bench by position for proper substitution order
+    bench.sort(key=lambda x: {'GK': 0, 'DEF': 1, 'MID': 2, 'FWD': 3}[x.position])
+    
+    return starting_11, bench
 
 if __name__ == "__main__":
     asyncio.run(main())
