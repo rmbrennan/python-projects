@@ -65,9 +65,18 @@ def run_pipeline(user_team_id: int):
 
 # Streamlit UI
 st.title("Agent Pipeline Runner")
+st.markdown("### A Streamlit app for running agent pipelines")
 
 # Add input for user team ID
 user_team_id = st.sidebar.text_input("Enter your FPL Team ID:", value="6256406")  # Default to a valid team ID
 
 # Run the pipeline
 results = run_pipeline(user_team_id)
+
+# Add a collapsible section for documentation
+with st.sidebar.expander("Documentation"):
+    st.markdown("### How to use this app")
+    st.markdown("1. Enter your FPL Team ID in the sidebar")
+    st.markdown("2. Click the 'Run Pipeline' button to start the pipeline")
+    st.markdown("3. Select which datasets to display in the sidebar")
+    st.markdown("4. Use the checkboxes to toggle dataset display")
