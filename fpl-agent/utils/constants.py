@@ -17,6 +17,13 @@ FORMATION_CONSTRAINTS: Dict[str, Tuple[int, int]] = {
     'FWD': (1, 3)
 }
 
+SQUAD_LIMITS: Dict[str, Tuple[int, int]] = {
+    'GK': 2,
+    'DEF': 5,
+    'MID': 5,
+    'FWD': 3
+}
+
 TEAM_CONSTRAINTS = {
     'BUDGET': 100.0,
     'MAX_PER_TEAM': 3,

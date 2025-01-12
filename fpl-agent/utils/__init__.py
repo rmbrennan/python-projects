@@ -4,6 +4,7 @@ Export utility functions and constants.
 from .constants import (
     POSITION_MAP, 
     FORMATION_CONSTRAINTS,
+    SQUAD_LIMITS,
     TEAM_CONSTRAINTS,
     API_ENDPOINTS
 )
@@ -11,6 +12,7 @@ from .constants import (
 __all__ = [
     'POSITION_MAP',
     'FORMATION_CONSTRAINTS',
+    'SQUAD_LIMITS',
     'TEAM_CONSTRAINTS',
     'API_ENDPOINTS'
 ]

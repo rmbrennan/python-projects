@@ -12,7 +12,7 @@ import numpy as np
 import requests
 
 # Local imports (assuming project structure from earlier)
-from utils.constants import API_ENDPOINTS
+from utils.constants import API_ENDPOINTS, POSITION_MAP
 from .base_agent import FPLAgent, AgentConfig
 from models.exceptions import DataFetchError
 
@@ -119,12 +119,7 @@ class DataScraperAgent(FPLAgent):
         """
         Map position on field to a string representation.
         """
-        position_mapping = {
-            1: 'GK',
-            2: 'DEF',
-            3: 'MID',
-            4: 'FWD'
-        }
+        position_mapping = POSITION_MAP
         return position_mapping.get(position, 'Unknown Position')
 
     def process_user_team(self, user_team_data: Dict, players_df: pd.DataFrame, teams_df: pd.DataFrame) -> pd.DataFrame:
