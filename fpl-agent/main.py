@@ -10,7 +10,7 @@ import logging
 # Local imports (assuming project structure from earlier)
 from agents.base_agent import FPLAgent
 from agents.data_scraper import DataScraperAgent
-from agents.team_optimizer import TeamOptimizerAgent
+from agents.team_optimizer import TeamOptimizer
 # from agents.transfer_recommender import TransferAgent
 
 def setup_agent_pipeline(user_team_id: int) -> List[FPLAgent]:

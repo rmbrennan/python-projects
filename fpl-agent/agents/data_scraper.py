@@ -28,13 +28,15 @@ class DataScraperAgent(FPLAgent):
             requires=set()  # No dependencies
         )
 
-    def process(self) -> Dict:
+    async def process(self) -> Dict:
         try:
-            if not self.user_team_id:
-                raise ValueError("User  team ID is required for DataScraperAgent.")
-            
-            data = self._fetch_data(self.user_team_id)
-            return data  # Return the fetched data
+            if self.user_team_id is not None:
+                # Fetch user team data if user_team_id is provided
+                data = self._fetch_data(self.user_team_id)
+            else:
+                # Fetch all players data if no user_team_id is provided
+                data = self._fetch_all_players_data()
+            return data
         except Exception as e:
             self.logger.error(f"Error processing data: {e}")
             raise DataFetchError(f"Failed to fetch FPL data: {e}")
@@ -46,6 +48,24 @@ class DataScraperAgent(FPLAgent):
         except RequestException as e:
             self.logger.error(f"Validation failed: {str(e)}")
             return False
+        
+    def _fetch_all_players_data(self):
+        try:
+            response = self.session.get(f"{self.base_url}bootstrap-static/")
+            response.raise_for_status()
+            basic_data = response.json()
+            players_df = pd.DataFrame(basic_data['elements'])
+            players_df['now_cost'] = players_df['now_cost'] / 10  # Convert to millions
+            return {'all_players': players_df}
+        except RequestException as e:
+            self.logger.error(f"API request failed: {str(e)}")
+            raise DataFetchError(f"API request failed: {str(e)}")
+        except (KeyError, json.JSONDecodeError) as e:
+            self.logger.error(f"Data processing failed: {str(e)}")
+            raise DataFetchError(f"Failed to process API response: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"Unexpected error: {str(e)}")
+            raise DataFetchError(f"Unexpected error while fetching data: {str(e)}")
         
     def _fetch_data(self, user_team_id: int) -> Dict[str, pd.DataFrame]:
         """

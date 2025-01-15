@@ -1,12 +1,19 @@
 import sys
 import os
 import unittest
+import logging
+import asyncio
 from dataclasses import dataclass
 from typing import List
+import warnings
+
+# Suppress FutureWarning for pd.concat
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*DataFrame concatenation with empty or all-NA entries.*")
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from agents.team_optimizer import TeamOptimizer
+from agents.data_scraper import DataScraperAgent
 from utils.constants import FORMATION_CONSTRAINTS, SQUAD_LIMITS
 
 @dataclass
@@ -54,5 +61,39 @@ class TestTeamOptimizer(unittest.TestCase):
         self.assertEqual(len(starting_eleven), 11)
         self.assertEqual(len(bench), 4)
 
-if __name__ == '__main__':
-    unittest.main()
+# Load the all_players dataset using the DataScraperAgent
+async def load_players_data():
+    data_scraper = DataScraperAgent()
+    data = await data_scraper.process()
+    all_players = data['all_players']
+    return all_players
+
+# Run the load_players_data function
+async def main():
+    all_players = await load_players_data()
+    return all_players
+
+# Example usage
+if __name__ == "__main__":
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
+
+    # Load players data (this part depends on your data source)
+    all_players = asyncio.run(main())  # Implement this function based on your data source
+
+    # Initialize the optimizer
+    optimizer = TeamOptimizer(all_players)
+
+    # Run the optimization
+    best_team = optimizer.create_optimal_team(iterations=1000)
+    print(best_team)
+
+    # Display the best team
+    starting_11, bench = best_team
+    print("Best Starting 11:")
+    for player in starting_11:
+        print(f"{player.name} - {player.position} - {player.expected_points} points")
+
+    print("\nBench:")
+    for player in bench:
+        print(f"{player.name} - {player.position} - {player.expected_points} points")
