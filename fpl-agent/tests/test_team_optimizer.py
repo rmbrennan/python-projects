@@ -85,15 +85,14 @@ if __name__ == "__main__":
     optimizer = TeamOptimizer(all_players)
 
     # Run the optimization
-    best_team = optimizer.create_optimal_team(iterations=1000)
-    print(best_team)
+    best_team = optimizer.create_optimal_team(iterations=10000)
 
     # Display the best team
     starting_11, bench = best_team
     print("Best Starting 11:")
-    for player in starting_11:
-        print(f"{player.name} - {player.position} - {player.expected_points} points")
-
+    for _, player in starting_11.iterrows():
+        print(f"{player['name']} - {player['position']} - {player['expected_points']} points")
+    print(f"Team Expected Score: {optimizer.evaluate_team(starting_11)}")
     print("\nBench:")
-    for player in bench:
-        print(f"{player.name} - {player.position} - {player.expected_points} points")
+    for _, player in bench.iterrows():
+        print(f"{player['name']} - {player['position']} - {player['expected_points']} points")

@@ -92,19 +92,23 @@ class TeamOptimizer:
             by_position['FWD'].iloc[1:]
         ]).sort_values(by='expected_points', ascending=False)
         
+        # Add the remaining 3 players
         for _, player in remaining_players.iterrows():
-            # Ensure the DataFrames are not empty before concatenation
-            if not starting_11.empty and not player.to_frame().T.empty:
-                temp_team = pd.concat([starting_11, player.to_frame().T])
-            if len(temp_team) <= 11 and self.validate_starting_eleven(temp_team):
+            # Create a temporary team by adding the current player
+            temp_team = pd.concat([starting_11, player.to_frame().T])
+            
+            # Check if the temporary team is valid and has 11 or fewer players
+            # if len(temp_team) <= 11 and self.validate_starting_eleven(temp_team):
+            if len(temp_team) <= 11:
                 starting_11 = temp_team
                 
+            # Stop once we have 11 players
             if len(starting_11) == 11:
                 break
-        
+                
         # Create bench from remaining players
         bench = squad[~squad['id'].isin(starting_11['id'])]
-        # print(starting_11['name'])
+        
         return starting_11, bench
     
     def create_random_team(self):
@@ -169,27 +173,36 @@ class TeamOptimizer:
         
         # Ensure no team has more than 3 players
         while any(count > max_players_per_team for count in team_counts.values()):
-            # Find a team with more than 3 players
-            problematic_team = next(team for team, count in team_counts.items() if count > max_players_per_team)
+            # Find all teams with more than 3 players
+            problematic_teams = [team for team, count in team_counts.items() if count > max_players_per_team]
             
-            # Find a player from the problematic team
-            problematic_players = team[team['team_code'] == problematic_team]
-            
-            # Check if there are any players from the problematic team
-            if not problematic_players.empty:
-                player_to_remove_index = problematic_players.index[0]
-                team = team.drop(player_to_remove_index).reset_index(drop=True)
+            for problematic_team in problematic_teams:
+                # Find all players from the problematic team
+                problematic_players = team[team['team_code'] == problematic_team]
                 
-                # Add a new random player from the same position
-                position_code = team.loc[player_to_remove_index, 'element_type']
-                eligible_players = self.all_players[
-                    (self.all_players['element_type'] == position_code) & 
-                    (~self.all_players['id'].isin(team['id']))
-                ]
+                # Calculate how many players need to be removed
+                excess_players = len(problematic_players) - max_players_per_team
                 
-                if not eligible_players.empty:
-                    new_player = eligible_players.sample(n=1)
-                    team = pd.concat([team, new_player], ignore_index=True)
+                # Remove the excess players at random
+                players_to_remove = problematic_players.sample(n=excess_players)
+                team = team.drop(players_to_remove.index).reset_index(drop=True)
+                
+                # Update team counts
+                team_counts[problematic_team] -= excess_players
+                
+                # Replace the removed players with new players from the correct positions and teams
+                for _, player in players_to_remove.iterrows():
+                    position_code = player['element_type']
+                    eligible_players = self .all_players[
+                        (self.all_players['element_type'] == position_code) & 
+                        (~self.all_players['id'].isin(team['id'])) &
+                        (self.all_players['team_code'].isin([t for t in team_counts if team_counts[t] < max_players_per_team]))
+                    ]
+                    
+                    if not eligible_players.empty:
+                        new_player = eligible_players.sample(n=1)
+                        team = pd.concat([team, new_player], ignore_index=True)
+                        team_counts[new_player['team_code'].values[0]] = team_counts.get(new_player['team_code'].values[0], 0) + 1
 
         # Add the 'position' column to the team DataFrame using POSITION_MAP
         team['position'] = team['element_type'].map(POSITION_MAP)
