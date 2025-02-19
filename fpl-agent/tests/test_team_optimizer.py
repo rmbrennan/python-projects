@@ -85,7 +85,7 @@ if __name__ == "__main__":
     optimizer = TeamOptimizer(all_players)
 
     # Run the optimization
-    best_team = optimizer.create_optimal_team(iterations=10000)
+    best_team = optimizer.create_optimal_team(iterations=100000)
 
     # Display the best team
     starting_11, bench = best_team

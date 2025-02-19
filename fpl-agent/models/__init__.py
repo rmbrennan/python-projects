@@ -1,7 +1,6 @@
 """
 Export models for easy importing.
 """
-from .player import Player, Squad, Formation
-from .exceptions import DataFetchError
+from .model_build import Player, Squad, Formation
 
 __all__ = ['Player', 'Squad', 'Formation', 'DataFetchError']
