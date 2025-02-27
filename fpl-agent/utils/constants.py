@@ -31,9 +31,10 @@ TEAM_CONSTRAINTS = {
 }
 
 API_ENDPOINTS = {
+    'base_url': 'https://fantasy.premierleague.com/api/',
     'bootstrap': 'bootstrap-static/',
     'fixtures': 'fixtures/',
     'player_summary': 'element-summary/{player_id}/',
-    'live': 'event/{event_id}/live/',
+    'event': 'event/{event_id}/live/',
     'user_team': 'my-team/{user_id}/',
 }
